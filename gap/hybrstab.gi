@@ -25,7 +25,7 @@ end );
 
 #############################################################################
 ##
-#F TransformPG( get, list, id )  . . . . . . . . . . . .convert get to element
+#F TransformPG( get, list, id ) . . . . . . . . . . . .convert get to element
 ##
 BindGlobal( "TransformPG", function( get, list, id )
     local coll, res, i;
@@ -140,10 +140,38 @@ end );
 
 #############################################################################
 ##
-#F PcgsOrbitStabilizer( A, oper, pt, fpt, info ) 
+#F PGOrbitLimit( A ) . . . . . . . . . . . . . user budget for orbit lengths
 ##
-BindGlobal( "PcgsOrbitStabilizer", function( A, oper, pt, fpt, info )
-    local pcgs, rels, stabl, srels, trans, trels, orbit, i, y, j, p, l, s, 
+BindGlobal( "PGOrbitLimit", function( A )
+    if IsBound( A.orbitLimit ) then return A.orbitLimit; fi;
+    return infinity;
+end );
+
+#############################################################################
+##
+#F PGSchreierWord( parent, gen, k ) . . . . . . . . . word for orbit block k
+##
+## The transversal of BlockOrbitStabilizer is a Schreier vector: block k
+## was obtained from block parent[k] by generator gen[k].
+##
+BindGlobal( "PGSchreierWord", function( parent, gen, k )
+    local word;
+    word := [];
+    while k > 1 do
+        Add( word, gen[k] );
+        k := parent[k];
+    od;
+    return Reversed( word );
+end );
+
+#############################################################################
+##
+#F PcgsOrbitStabilizer( A, oper, pt, fpt, info, limit )
+##
+## Returns fail if the orbit would exceed <limit> points.
+##
+BindGlobal( "PcgsOrbitStabilizer", function( A, oper, pt, fpt, info, limit )
+    local pcgs, rels, stabl, srels, trans, trels, orbit, i, y, j, p, l, s,
           k, t, h, g, dict;
 
     pcgs := A.agAutos;
@@ -185,6 +213,7 @@ BindGlobal( "PcgsOrbitStabilizer", function( A, oper, pt, fpt, info )
                 # enlarge orbit
                 p := rels[i];
                 l := Length( orbit );
+                if p * l > limit then return fail; fi;
                 orbit[p*l] := true;
                 s := 0;
                 for k  in [ 1 .. p - 1 ]  do
@@ -219,36 +248,55 @@ end );
 
 #############################################################################
 ##
-#F BlockOrbitStabilizer( B, oper, os, fpt, info )
+#F BlockOrbitStabilizer( B, oper, os, fpt, info, limit, state )
 ##
-BindGlobal( "BlockOrbitStabilizer", function( B, oper, os, fpt, info )
-    local bl, l, li, orbit, trans, stabl, pstab, mats, auts, ords, pers,
-          k, pt, i, y, j, new, get, aut, g, per, s, dict, r, stabGrp;
+## Orbit of the block <os>.orbit under the gl part of <B>.  Once the orbit
+## has more than <limit> blocks the enumeration stops and returns its
+## state with the component partial := true; passing that record as
+## <state> resumes it (<state> = fail starts afresh).
+##
+BindGlobal( "BlockOrbitStabilizer", function( B, oper, os, fpt, info, limit,
+                                              state )
+    local bl, l, li, orbit, parent, gen, stabl, pstab, mats, auts, ords,
+          pers, k, pt, i, y, j, new, get, aut, g, per, s, dict, r, stabGrp;
 
     # the block and limit for orbit length
     bl := os.orbit;
     l  := Length( bl );
     li := B.glOrder / Factors( B.glOrder )[1];
 
-    # set up orbit, transversal and stab
-    orbit := [ bl ];
-    dict := NewDictionary( bl[1], true );
-    for j in [1..l] do
-        AddDictionary( dict, bl[j], [1,j] );
-    od;
-    trans := [ [] ];
-    stabl := [];
-    pstab := [];
-
     # get acting elements
     auts := B.glAutos;
     ords := List( auts, Order );
-    stabGrp := Group( () );
     if IsBound( B.glOper ) then pers := B.glOper; fi;
 
+    if state = fail then
+        # set up orbit, transversal (Schreier vector) and stab
+        orbit := [ bl ];
+        dict := NewDictionary( bl[1], true );
+        for j in [1..l] do
+            AddDictionary( dict, bl[j], [1,j] );
+        od;
+        parent := [ 0 ];
+        gen := [ 0 ];
+        stabl := [];
+        pstab := [];
+        stabGrp := Group( () );
+        k := 1;
+    else
+        orbit := state.orbit;   dict := state.dict;
+        parent := state.parent; gen := state.gen;
+        stabl := state.stabl;   pstab := state.pstab;
+        stabGrp := state.stabGrp; k := state.k;
+    fi;
+
     # loop
-    k := 1;
     while k <= Length( orbit ) do
+        if Length( orbit ) > limit then
+            return rec( partial := true, orbit := orbit, dict := dict,
+                        parent := parent, gen := gen, stabl := stabl,
+                        pstab := pstab, stabGrp := stabGrp, k := k );
+        fi;
         if k mod 10000 = 0 then
             Info( InfoAutGrp, 5, "      orbit pos ", k, " of ",Length(orbit));
         fi;
@@ -267,12 +315,13 @@ BindGlobal( "BlockOrbitStabilizer", function( B, oper, os, fpt, info )
                     AddDictionary( dict, new[s], [Length(orbit)+1, s] );
                 od;
                 Add( orbit, new );
-                get := Concatenation( trans[k], [i] );
-                Add( trans, get );
+                Add( parent, k );
+                Add( gen, i );
             else
 
                 # enlarge stabilizer
-                get := Concatenation(trans[k], [i], Reversed(-trans[j[1]])); 
+                get := Concatenation( PGSchreierWord( parent, gen, k ), [i],
+                           Reversed( -PGSchreierWord( parent, gen, j[1] ) ) );
                 get := ReduceGet( ords, get );
                 aut := TransformPG( get, auts, B.one );
 
@@ -311,33 +360,112 @@ end );
 
 #############################################################################
 ##
-#F PGHybridOrbitStabilizer( A, glMats, agMats, pt, oper, info )
+#F PGHybridOrbitStabilizer( A, glMats, agMats, pt, oper, info[, induce] )
 ##
-BindGlobal( "PGHybridOrbitStabilizer", function( A, glMats, agMats, pt, oper, info )
-    local os, OS, B;
+## Replaces <A> by the stabilizer of <pt>.  Returns fail if the orbit
+## budget of <A> (see PGOrbitLimit) is exceeded, true otherwise.  <induce>
+## maps the matrix of an automorphism on the multiplicator to its action
+## on the section the points live in.
+##
+## Without <induce> the points need not be subspaces and the orbit is
+## enumerated: the Polycyclic package calls this function with subgroups as
+## points and the automorphisms themselves in place of matrices.
+##
+## The gl orbit is enumerated in rounds of geometrically growing length.
+## After each round the set stabilizer method (PGPermStabilizer) is
+## attempted, allowed to spend on its permutation domain at most as many
+## vector-matrix products as the enumeration has done so far, so failed
+## attempts cost at most as much as the enumeration they try to replace.
+## The domain built so far is kept between attempts.  The bound counts
+## work, not time, so the computation takes the same path on every
+## machine.
+##
+BindGlobal( "PGHybridOrbitStabilizer",
+  function( A, glMats, agMats, pt, oper, info, induce... )
+    local os, OS, agAutos, limit, blocks, method, time, l, round, state,
+          dstate, budget, exhausted;
+
+    if Length( induce ) > 1 then
+        Error( "PGHybridOrbitStabilizer takes six or seven arguments" );
+    elif Length( induce ) = 1 then
+        induce := induce[1];
+    else
+        induce := fail;
+    fi;
 
     # compute ag orbit stabilizier
-    if Length( glMats ) = 0 and Length( agMats ) = 0 then return; fi;
-    os := PcgsOrbitStabilizer( A, agMats, pt, oper, info );
+    if Length( glMats ) = 0 and Length( agMats ) = 0 then return true; fi;
+    time := Runtime();
+    limit := PGOrbitLimit( A );
+    os := PcgsOrbitStabilizer( A, agMats, pt, oper, info, limit );
+    if os = fail then
+        Info( InfoAutGrp, 2, "    ag-orbit exceeds limit ", limit );
+        return fail;
+    fi;
     Info( InfoAutGrp, 4, "    ag-orbit -- length ",Length(os.orbit));
 
-    # add info to A
+    # add info to A; keep the generators of the full ag part for the set
+    # stabilizer, which needs the whole group S, not just its stabilizer
+    agAutos := A.agAutos;
     A.agAutos := os.stabl;
     A.agOrder := os.srels;
 
     # compute block orbit and stabiliser
-    if Length( glMats ) = 0 then return; fi;
-    OS := BlockOrbitStabilizer( A, glMats, os, oper, info );
-    Info( InfoAutGrp, 4, "    gl-orbit -- length ", OS.length, 
+    if Length( glMats ) = 0 then return true; fi;
+    l := Length( os.orbit );
+    if limit = infinity then
+        blocks := infinity;
+    else
+        blocks := QuoInt( limit, l );
+    fi;
+
+    method := "enumerated";
+    round := PG_ESCALATE_BLOCKS;
+    state := fail;
+    dstate := rec();
+    repeat
+        OS := BlockOrbitStabilizer( A, glMats, os, oper, info,
+                                    Minimum( round, blocks ), state );
+        if not IsBound( OS.partial ) then break; fi;
+        state := OS;
+        exhausted := round >= blocks;
+        if PERM_STAB and induce <> fail and IsBound( A.glOper ) then
+            # once the orbit budget is spent, one last attempt without a
+            # work bound; otherwise the enumeration has applied each gl
+            # generator to about every point of every block
+            if exhausted then
+                budget := infinity;
+            else
+                budget := Length( state.orbit ) * l * Length( glMats );
+            fi;
+            OS := PGPermStabilizer( A, glMats, agMats, agAutos, os, pt,
+                                    oper, info, induce, budget, dstate );
+            if OS <> fail then
+                method := "set stabilizer";
+                break;
+            fi;
+        fi;
+        if exhausted then
+            Info( InfoAutGrp, 2, "    gl-orbit exceeds limit ", limit );
+            return fail;
+        fi;
+        round := round * PG_ESCALATE_GROWTH;
+    until false;
+    Info( InfoAutGrp, 4, "    gl-orbit -- length ", OS.length,
                          " -- gens ",Length(OS.stabl));
-  
+
     # set up new aut grp
     A.glAutos := OS.stabl;
     A.glOrder := A.glOrder / OS.length;
     Assert(1,IsInt(A.glOrder));
     if IsBound( A.glOper ) then A.glOper := OS.pstab; fi;
 
+    Info( InfoAutGrp, 2, "    stabilizer: ag-orbit ", l,
+          ", gl-orbit ", OS.length, " (", method, "), gl part ", A.glOrder,
+          ", ", Runtime() - time, " ms" );
+
     # nice the glAutos if necessary
     if NICE_STAB and OS.length > 1 then NiceHybridGroup( A ); fi;
+    return true;
 end );
 

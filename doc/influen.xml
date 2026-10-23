@@ -28,6 +28,11 @@ choices the later sections of this chapter.
 <Section Label="Outline of the algorithm">
 <Heading>Outline of the algorithm</Heading>
 
+The algorithm and its refinements are described in
+<Cite Key="ELO02"/>; the basic algorithm goes back to
+<Cite Key="OBr95"/>. Here we give a brief outline.
+<P/>
+
 The basic algorithm proceeds by induction
 down the lower <M>p</M>-central series of a given <M>p</M>-group <M>G</M>; that is, it
 successively computes <M>Aut(G_i)</M> for the quotients <M>G_i = G / P_i(G)</M> of
@@ -66,8 +71,8 @@ of <M>Aut(G_i)</M>-invariant subspaces of <M>M</M>.
 <P/>
 
 Orbit-stabiliser computations in finite solvable groups given by a
-polycyclic generating sequence are much more efficient than generic
-computations of this type. Thus our algorithm makes use of a large
+polycyclic generating sequence <Cite Key="LNS84"/> are much more
+efficient than generic computations of this type. Thus our algorithm makes use of a large
 solvable normal subgroup <M>S</M> of <M>Aut(G_i)</M>. Further, it is useful if
 the generating set of <M>Aut(G_i)</M> outside <M>S</M> is as small as possible.
 To achieve this we determine a permutation representation of <M>Aut(G_i)/S</M>
@@ -136,7 +141,8 @@ Aut(G_i)</M> acts as matrix group on the elementary abelian <M>p</M>-group
 <M>M</M> and we want to determine the stabiliser of a subgroup <M>U \leq M</M>.
 <P/>
 
-We use the MeatAxe to compute a series of <M>A</M>-invariant subspaces
+We use the MeatAxe <Cite Key="HR94"/> to compute a series of
+<M>A</M>-invariant subspaces
 through <M>M</M> such that each factor in the series is irreducible as
 <M>A</M>-module. Then we use this series to break the computation
 of <M>Stab_A(U)</M> into several smaller orbit-stabiliser calculations.
@@ -156,6 +162,51 @@ tries to determine <M>Stab_A(U)</M> in one step. By default, <C>CHOP_MULT</C>
 is <K>true</K>.
             </Description>
 </ManSection>
+
+Each orbit-stabiliser calculation enumerates the orbit of a subspace
+under the generators of <M>A</M> outside <M>S</M>. When the stabiliser is
+small this orbit is long, up to <M>|A/S|</M>, and the enumeration is
+hopeless. Hence, once the orbit exceeds a few thousand points, the
+stabiliser is also sought as a set stabiliser, by the partition
+backtrack of &GAP; (<Ref Oper="Stabilizer" BookName="ref"/> with
+<C>OnSets</C>), in a permutation representation of <M>A</M> on the
+points of <M>A/S</M> and the lines of the module section in the orbits
+of the lines of the subspace. This needs the permutation representation of <M>A/S</M> which
+the initialisation by <C>InitAutomorphismGroupOver</C> provides. The
+enumeration continues in rounds of growing length, and after each round
+the set stabiliser is tried again, allowed to spend on its permutation
+domain at most as much work as the enumeration has done so far, so that a
+group on which it cannot help costs at most twice its enumeration.
+
+<ManSection>
+            <Var Name="PERM_STAB"/>
+            <Description>
+The set stabiliser method is used if the global variable <C>PERM_STAB</C>
+is <K>true</K>, the default. Setting it to <K>false</K> forces orbit
+enumeration.
+            </Description>
+</ManSection>
+
+<Subsection Label="The option OrbitLimit">
+<Heading>The option OrbitLimit</Heading>
+<C>AutomorphismGroupPGroup( G : OrbitLimit := n )</C> returns
+<K>fail</K> as soon as an orbit-stabiliser calculation would enumerate
+more than <A>n</A> points and the set stabiliser method cannot be used. This lets a
+computation over many groups set aside the expensive ones instead of
+losing the whole job. The method for <C>AutomorphismGroup</C> signals an
+error in this case, since an attribute cannot be <K>fail</K>.
+<Example><![CDATA[
+gap> G := PcGroupCode( 103045690560068391423508120999240094531550914947096312619671359, 512 );;
+gap> SetInfoLevel( InfoAutGrp, 0 );
+gap> PERM_STAB := false;;
+gap> AutomorphismGroupPGroup( G : OrbitLimit := 1000 );
+fail
+gap> PERM_STAB := true;;
+gap> A := AutomorphismGroupPGroup( G : OrbitLimit := 1000 );;
+gap> A.size;
+262144
+]]></Example>
+</Subsection>
 </Section>
 
 <Section Label="Searching for a small generating set">
